@@ -1,0 +1,401 @@
+---
+title: "Assignment 2 - GDAA 1000"
+subtitle: "Explortory Data Analysis (EDA) on a Dataset of Choice"
+author: "Tomas Milla-Koch"
+date: "23/11/2021"
+# header-includes:
+#   - \usepackage{titling}
+#   - \preauthor{\begin{center}\LARGE
+#   - \includegraphics[width=2in, height=2in]{COGS_LOGO.png}\\[bigskipamount]
+#   - \vspace{1.5in}}
+#   - \postauthor{\end{center}}
+
+  
+output:
+  pdf_document: default
+  toc: true
+  toc_depth: 3
+---
+\newpage
+\tableofcontents
+\listoffigures
+\listoftables
+\newpage
+
+
+```{r setup, echo=FALSE, include=FALSE}
+#making sure that any warning messages are suppressed
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+
+#loading the libraries
+library("readr")
+library("rnaturalearth")
+library("rnaturalearthdata")
+library('sf')
+library('ggplot2')
+library("dplyr")
+library("grid")
+library("gridExtra")
+library("knitr")
+```
+
+# Introduction
+ 
+The purpose of this assignment was to perform exploratory data analysis (EDA) on a dataset of our choice. In doing so we hope to advance our knowledge of the R language and how to collect datasets for ourselves as well as manipulate them. The dataset that was chosen ended up being several datasets of varying topics combined into one. In working with one dataset of multiple variables of different topics, it is the hope that many different combinations of variables within the ggplot2 library will need to be explored and compared in order to produce legible plots. In this way, we can truly understand both the structure of the data we are work with, and the library in which we wish to visualize it in. However, there was a general theme in mind for the dataset's conception. Human needs and statistics vary across the globe and depend on a multitude of factors. Therefore, a manageable amount of variables were selected and combined based on whether they fit well with the theme of outlining population statistics of human needs and character globally, primarily surrounding drinking water and mental health. The final dataset produced some key questions such as could there be any sort of covariation between sets of variables that come from different datasets. For example, how wealthy a country might determine a general livelihood of the population that makes of that country. Therefore, will the income bracket of a country affect how much of the population will have access to drinking water? Will it affect the mental health statistics of its citizens? These are some of the questions that will be explored throughout this EDA.  
+
+
+# Data Selection and Preparation
+
+The dataset was chosen at first glance based on the categorical variables found within five different datasets. The final dataset would need factors that would easily group countries. The main categorical variable was the income group of the countries. However, two other factors were added in order to see how they would affect the EDA; ranking of both countries' temperature targets as per the 2015 Paris agreement on climate change and the countries' water vulnerability rating. A final dataset was needed in order to make the dataset have a spatial component. The datasets were found through two online resources: Github and OurWorldinData.org (see Data sources for more information). In addition, the geometry of the dataset was obtained through the *rnaturalearthdata* package.
+
+The data preparation process involved several steps. First, the five datasets with country data were read into an R markdown file. This data was comprised of a country geometry dataset, a deaths caused by suicide dataset, a eating disorder dataset, a water and sanitation dataset, and a climate target assessment dataset.  In order to combine the data, the merge function from the sp package was used sequentially on each of the datasets until they were all combined into a simple feature object. The number of observations, or number of countries, was confined to the lowest common amount in any of the datasets which was the climate target assessment dataset for a total of 187 countries. The majority of the datasets had many years of observations for each country so, to make the analysis more streamlined, each observation in the dataset was filtered to the year 2016. This was the year directly after the Paris Agreement and when the climate plans were put forward as per the climate target assessment dataset. The data was then manipulated such that the columns representing categorical variables were transformed into factors and the other columns were renamed for convenience. A crucial step in this process was assigning a value to any of the categorical variable values that might be missing some. The data would tell us less if there were a group of countries whose factor value was *NA*. Therefore, all missing values were assigned to 0 in order to facilitate the grouping process. The missing values for the numerical variables were not assigned a new value as they were removed automatically when plotting.
+
+
+
+
+```{r, echo= FALSE, message=FALSE, warning=FALSE, results='hide'}
+#loading my data and storing it in a data.frame
+myfile <- "https://raw.githubusercontent.com/openclimatedata/ndc-assessments/master/data/ndc-content-klimalog-die-gdi.csv"
+mydata<- read.csv(myfile)
+
+#filtering the data and adding geometry column from natural earth package
+world <- ne_countries(scale = "medium", returnclass = "sf")
+newworld <- world[,c("name", "iso_a3", "pop_est", "income_grp")] #reduce world to name, iso_code and geometry
+names(newworld)[2] = "country_code"
+
+#merge on key country_code
+combined = merge(newworld, mydata, by="country_code", all.x = TRUE, all.y = TRUE) #merge sf and data.frame objects
+
+#remove title blocks in dataset and filter
+combined <- combined[-c(1:9),] #removing unnecessary rows at the top of the dataset
+combined <- combined[,c("name", 
+                        "country_code", 
+                        "vulnerability_water_class",  #selecting certain columns for further analysis
+                        "temp_target_class",
+                        "pop_est",
+                        "income_grp")]
+#----------------------------------------------------------------------------------------------------------------
+#these datasets must have the right path names if not, document wont knit or run 
+myfile2 <- "E:/GDAA R stuff/ass.2/water-and-sanitation.csv" #another outside dataset for drinking water scarcity
+mydata2 <- read.csv(myfile2)
+
+#mental health dataset#1
+suicide_file <- "E:/GDAA R stuff/ass.2/suicide-rates-vs-prevalence-of-mental-and-substance-use-disorders.csv" 
+suicide <- read.csv(suicide_file)
+suicide <- suicide[suicide$Year == "2016",]
+#mental health dataset#2
+eating_file <- "E:/GDAA R stuff/ass.2/prevalence-of-eating-disorders-in-males-vs-females.csv"
+eating <- read.csv(eating_file)
+eating <- eating[eating$Year == "2016",]
+
+#----------------------------------------------------------------------------------------------------------------
+#filter the data and take what we wish to convey
+water <- mydata2[,c("Entity", "Year", "Access.to.basic.drinking.water")]
+water <- water[water$Year == "2016",] #confine year to the year of the first published dataset (climate target)
+names(water)[1] = "name"
+
+#merge the datasets together
+combined2 <- merge(combined, water, by="name", all.x = FALSE, all.y = FALSE)
+names(combined2)[2] = "Code"
+combined2 <- merge(combined2, suicide, by="Code", all.x = FALSE, all.y = FALSE)
+combined2 <- merge(combined2, eating, by="Code", all.x = FALSE, all.y = FALSE)
+
+#-----------------------------------------------------------------------------------------------------------
+#converting to factor
+combined2$vulnerability_water_class <- as.factor(combined2$vulnerability_water_class)
+combined2$temp_target_class <- as.factor(combined2$temp_target_class)
+combined2$income_grp <- as.factor(combined2$income_grp)
+
+#changing NA values to 0
+combined2$vulnerability_water_class[is.na(combined2$vulnerability_water_class)] <- 0
+combined2$temp_target_class[is.na(combined2$temp_target_class)] <- 0
+
+#reorganize dataset
+combined2[, c("pop_est", 
+              "Year.x", 
+              "Entity.x",
+              "Year.y",
+              "Continent.x",
+              "Continent.y",
+              "Year",
+              "Entity.y",
+              "Population..historical.estimates..y",
+              "Prevalence...Mental.and.substance.use.disorders...Sex..Both...Age..Age.standardized..Rate.")] <- list(NULL)
+
+#rename variables
+combined2 <- combined2 %>% rename("Drink" = "Access.to.basic.drinking.water",
+                                  "Deaths_100_SHarm" = "Deaths...Self.harm...Sex..Both...Age..Age.standardized..Rate.",
+                                  "pop_est" = "Population..historical.estimates..x",
+                                  "Male_eating" = "Prevalence...Eating.disorders...Sex..Male...Age..Age.standardized..Percent.",
+                                  "Female_eating" = "Prevalence...Eating.disorders...Sex..Female...Age..Age.standardized..Percent.")
+
+#remove numbers in front of description for income group factor
+combined2$income_grp <- gsub("^.{0,2}", "",combined2$income_grp)
+
+```
+
+
+\newpage
+# Data Summary
+
+The final product was a simple feature with the following structure:
+```{r, echo=FALSE}
+#structure of dataset
+str(combined2)
+```
+
+The techinical summary of the dataset can be found below.
+```{r, echo=FALSE}
+#table for summary divided up into 3 as there are too amny variables to fit on one page
+tab1 <- data.frame(unclass(summary(combined2)))
+kable(tab1[1:3], caption = "Summary output of dataset (variables 1-3)")
+kable(tab1[4:6], caption = "Summary output of dataset (variables 4-6)")
+kable(tab1[7:11], caption = "Summary output of dataset (variables 7-11)")
+```
+
+
+# Exploration of Variation
+
+By exploring variation in the dataset, we go through the variables that make up the dataset and how they are represented on the global scale (i.e. country counts). First, we will look at the categorical variables; the temperature target rankings, the water vulnerability rankings, and the income groups of the various countries (see Figure 1). 
+
+As stated in the introduction, the categorical variable that is most expected to have a relationship with its numerical counterparts is the income group. Therefore it might be useful to get a more precise makup of the income groups of the dataset (see Figure 2).
+
+
+
+```{r, echo=FALSE, fig.cap="Counts of categorical variables in final dataset.", warning=FALSE}
+# bar plot for categorical variables
+
+one <- ggplot(combined2, aes(x=temp_target_class))+
+        geom_bar(stat = "count")+
+        xlab("Temperature target ranking")+
+        ylab("Count")+
+        coord_flip()
+
+two <- ggplot(combined2, aes(x=vulnerability_water_class))+
+       geom_bar(stat = "count")+
+       xlab("Water vulnerability class")+
+       ylab("Count")+
+       coord_flip()
+
+three <- ggplot(combined2, aes(x=income_grp))+
+         geom_bar(stat = "count")+
+         xlab("Income group")+
+         ylab("Count")+
+         coord_flip()
+
+#outputting all graphs onto one plot
+grid.arrange(one,two, three, ncol=2, nrow=2)
+```
+
+
+
+
+```{r, echo=FALSE, fig.cap="Donut chart displaying the income groups of the dataset in percentages."}
+#making a donut chart
+counts <- data.frame(table(combined2$income_grp)) 
+
+#percentages
+counts$fraction <- counts$Freq/ sum(counts$Freq)
+counts$ymax <- cumsum(counts$fraction)
+counts$ymin <- c(0, head(counts$ymax, n=-1))
+counts$labelpos <- (counts$ymax + counts$ymin)/2
+counts$label <- paste0(counts$Var1, "\n", round(counts$fraction*100, 1), "%")
+
+#plot
+ggplot(counts, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Var1)) +
+  geom_rect() +
+  geom_label( x=3.5, aes(y=labelpos, label=label), size=3) +
+  scale_fill_brewer(palette=7) +
+  coord_polar(theta="y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  theme(legend.position = "none")
+```
+
+
+
+Thus, going forward we can see that the upper middle income and lower middle income groups make up the majority of the countries in the dataset.
+
+Proceeding the categorical variables, the four numeric variables follow with their occurrences within the dataset visualized through multiple histograms (see Figure 3). The only numerical variable left out of Figure 3 is that of the country population estimates because the histogram would be too skewed as the outliers with much larger populations, such as China and India, would force the bins of a histogram to the left. Therefore, there where not much useful information obtained.
+
+
+
+```{r,echo=FALSE, fig.cap="All numeric variables in the dataset.", warning=FALSE}
+#histograms for numeric variables
+h1 <- ggplot(combined2, aes(Drink)) +
+  geom_histogram(col="red",
+                 fill="green",
+                 alpha=0.2) +
+  labs(x="% of Population with Access to Drinking Water", y="Count")
+
+h2 <- ggplot(combined2, aes(Deaths_100_SHarm)) +
+  geom_histogram(col="red",
+                 fill="blue",
+                 alpha=0.2) +
+  labs(x="Number of deaths per 100000 by Suicide", y="Count")
+
+h3 <- ggplot(combined2, aes(Male_eating)) +
+  geom_histogram(col="red",
+                 fill="black",
+                 alpha=0.2) +
+  labs(x="% of Population with Eating Disorder (Male)", y="Count")
+
+h4 <- ggplot(combined2, aes(Female_eating)) +
+  geom_histogram(col="red",
+                 fill="yellow",
+                 alpha=0.2) +
+  labs(x="% of Population with Eating Disorder (Female)", y="Count")
+
+#multiple histogram plot
+grid.arrange(h1,h2,h3,h4, ncol=2)
+```
+
+
+
+However, what lacks in the Figure above is more detail on how the numeric variables are distributed across their occurrences. For example, the percentage of the populations of each country that has access to drinking water is clearly presented in the previous figure but, apart from the counts of different percentage ranges, we do not know how this variable is distributed by countries. Therefore, it might be more useful to have this variable's occurrences divided by the countries' income group (see Figure 4).
+
+
+
+```{r, echo=FALSE, fig.cap="Overlapping count plot of drinking water variable.", warning=FALSE}
+#freq poly plot
+ggplot(combined2, aes(Drink, colour = income_grp)) +
+  geom_freqpoly()
+```
+
+
+
+Below, we have a better idea of how the drinking water variable is distributed within the countries and more specifically, their income groups. The lower percentages are mostly dominated by the two lower income country brackets, which would stand to reason as they may not have the resources to install or maintain clean water infrastructure. Furthermore, we might be able to see the dispersion of the variable better on a cloropleth map (Figure 5).
+
+
+
+```{r, echo=FALSE, fig.cap="Percentage of population with access to drinking water by country."}
+#cloroplethmap of drinking water variable
+plot(combined2["Drink"],
+     main = NULL)
+```
+
+
+
+\newpage
+# Exploration of Covariation
+
+We will now explore covariation between the variables in this dataset. Given that this dataset is built up of several others, this section will be telling on whether or not there are any correlations between the variables. A number of different plots from *ggplot2* can be used to display covariation, or lack thereof. For example, a heatmap is a good teller of whether there is covariation or not between the chosen variables. Depending on the colour palette used, shading within the heatmap will tell us what the variables relationships are to each other. Let us look at the only combination of variables in this dataset that would produce close to the output of a typical heatmap (see Figure 6).  
+
+
+
+```{r, echo=FALSE, fig.cap="Heatmap for categorical variables within the dataset."}
+#heatmap
+ggplot(combined2, aes(vulnerability_water_class, income_grp,  fill=temp_target_class)) +
+  geom_tile() +
+  labs(fill = "Temperature target ranking", x = "Water vulnerability ranking", y = "Income group")
+
+```
+
+
+As shown above, this heatmap is not great at conveying covariation within this dataset as this is the only combination with a useable output. This could be due to the fact that the variables used are factors and not numerical. If we had used the population estimate variable for instance, a more useful heatmap would have been produced. However this would only happen if the population was only taken over selected countries as there are a large amount of observations to be constrained to the graph output. Therefore we will look to other graphs to find covariation.
+
+Let us focus on a more specific question in order to streamline what might be a good combination of variables to use. For example, would we expect countries of higher income to have more of their respective populations able to drink water or not? Logically, that would make sense as wealthier countries can invest more in infrastructure for water filtration systems and such. However, only displaying these questions by plotting them will yield the desired results. 
+
+Below is a box plot of the aforementioned variables of interest. By using a boxplot, we can see the distribution of the percentage of the population with access to drinking water as per the countries' income groups. We see not only that the highest income group has the majority of its populations at near 100% but also that the few outliers within this income group dip far less that those of the upper middle income group for example (Figure 7). This tells us that even the lowest observations of the drinking water variable for OECD countries are high relative to the other income groups. 
+
+
+
+```{r, echo=FALSE, fig.cap="Dispersal of access to drinking water accross countries based on income group."}
+#boxplot
+ggplot(combined2, aes(income_grp, Drink)) +
+  geom_boxplot() +
+  labs(x="Income group", y="% of population with access to drinking water") + 
+  coord_flip()
+
+```
+
+
+The income group factor is thus worth exploring as it has already provided us with a clear covariation within the last example. We will try and focus on the mental health variables now starting with the prevalence of eating disorders in males and females.
+
+
+```{r, echo=FALSE, fig.cap="Countries and their prevalence of eating disorders in both males and females (grouped by income group)."}
+#scatterplot
+ggplot(combined2, aes(x=Male_eating , y=Female_eating, size = pop_est)) +
+  geom_point(aes(colour = income_grp), alpha=0.5) +
+  labs(col="Income Group") +
+  xlab("% of male population with eating disorder") +
+  ylab("% of female population with eating disorder")
+
+```
+
+
+Below, we can begin to see some sort of relationship between the aforementioned variables. As the scatterplot values increase on both the x and y axes, the colours of the countries increase gradually in the same order as the income group in reverse order. This can lead us to believe that prevalence of male and female eating disorders generally increases with the income of a country group.
+
+For further analysis, lets say that we wish to see the same variables as before but grouped by the other factor variables; temperature target class and water vulnerability class (Figure 9, 10).
+
+
+
+```{r, echo=FALSE, fig.cap="Countries and their prevalence of eating disorders in both males and females (grouped by temperature target ranking).", message=FALSE}
+#scatterplot
+ggplot(combined2, aes(x=Male_eating , y=Female_eating, size = pop_est)) +
+  geom_point(aes(colour = temp_target_class), alpha=0.5) +
+  labs(col="Temperature class ranking", size="Population") +
+  xlab("% of male population with eating disorder") +
+  ylab("% of female population with eating disorder") 
+
+```
+
+
+
+
+```{r, echo=FALSE, fig.cap="Countries and their prevalence of eating disorders in both males and females (grouped by water vulnerability class)."}
+#scatterplot
+ggplot(combined2, aes(x=Male_eating , y=Female_eating, size = pop_est)) +
+  geom_point(aes(colour = vulnerability_water_class), alpha=0.5) +
+  labs(col="Water vulnerability ranking") +
+  xlab("% of male population with eating disorder") +
+  ylab("% of female population with eating disorder") 
+
+```
+
+
+Now if we look at the variable representing deaths per 100000 caused by suicides, we see that there is no strong relationship between that and income group. The majority of countries, with the exception of a few outliers, have values in the 5-10 deaths per 100000 range (Figure 11). This would imply that the income group of a country would not have a large impact on the number of deaths by suicide.
+
+
+
+```{r, echo=FALSE, fig.cap="Dispersal of deaths cause by suicide in countries grouped by income."}
+#boxplot
+ggplot(combined2, aes(income_grp, Deaths_100_SHarm, fill=income_grp)) +
+  geom_boxplot() +
+  labs(y="Deaths per 100000 casued by suicide", x="Income group") +
+  coord_flip() +
+  theme(legend.position = "none")
+
+```
+
+
+Let us explore this variable further. We will conbine it with the only variable that has not been discussed;  the populations of countries with access to drinking water. This relationship is the last to be known of the numerical variables.
+
+
+
+```{r, echo=FALSE, fig.cap="Death per 100000 by suicide as a function of population with access to drinking water"}
+#scatterplot
+ggplot(combined2, aes(x=Drink , y=Deaths_100_SHarm, size = pop_est)) +
+  geom_point(aes(colour = income_grp), alpha=0.5) +
+  labs(col="Temperature class ranking") +
+  xlab("Population with access to drinking water (%)") +
+  ylab("Deaths caused by suicide (deaths per 100000)") 
+
+```
+
+
+Similarly to the other numerical variables, there is not clear relationship between the above variables (Figure 12). There is a large amount of clustering towards the 100% value as most countries, according to the dataset, have a high amount of their population with access. As the number of deaths increase, there is little evidence to suggest that there are any changes when grouped by income group.
+
+# Discussion
+
+After performing analyses for both variation and covariation within the dataset, it can generally be concluded that there is very little covariation within this dataset. The only instance would be when we look at the percentages of population with eating disorders (male versus. female). We saw that as income groups moved from lower to upper income brackets, the variable values increased relatively linearly until we reached the higher income countries. Therefore, as expected, income group played a larger part in the EDA than the other categorical variables as it affect both eating disorder variables and the drinking water variable. However, income group did not affect the number of deaths per 100000 by suicide in any country. Why is it that this occurs? This dataset does not provide any reason for this thus, if further work were to be done, it would need another dataset perhaps solely dedicated to suicide counts within countries. That way we could narrow down possible reason for this lack of relationship. As for the rest of the dataset, the EDA did not yield many definitive correlations.
+
+While there were not many interesting or unsuspected results produced from this EDA, visualizing the datasets through many different plot has given a visual aid to understanding the dataset. For example, making a cloropleth map of any categorical variable helped show the global distribution of the variables and their values per country. As stated earlier in the discussion, further analysis should focus on more on the mental health statistics such as the percentage of eating disorders within countries in the dataset. It would also be interesting to add an interactive component to the visualization process. This way, any viewer of the plots could obtain many values pertaining to a country simply by dragging their cursor across the plot.
+
+# Data Sources
+
+Pauw, W.P. et al. (2016). NDC Explorer. German Development Institute / Deutsches Institut für Entwicklungspolitik (DIE), African Centre for Technology Studies (ACTS), Stockholm Environment Institute (SEI). DOI: 10.23661/ndc_explorer_2017_2.0
+
+Hannah Ritchie and Max Roser (2021) - "Clean Water and Sanitation". Published online at OurWorldInData.org. Retrieved from: 'https://ourworldindata.org/clean-water-sanitation' [Online Resource]
+
+Saloni Dattani, Hannah Ritchie and Max Roser (2021) - "Mental Health". Published online at OurWorldInData.org. Retrieved from: 'https://ourworldindata.org/mental-health' [Online Resource]
